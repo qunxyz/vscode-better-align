@@ -127,7 +127,8 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "build": "vsce package"
   },
   "devDependencies": {
     "@types/glob": "^8.0.0",
@@ -137,6 +138,7 @@
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
     "@vscode/test-electron": "^2.1.5",
+    "@vscode/vsce": "^2.15.0",
     "esbuild-loader": "^2.20.0",
     "eslint": "^8.23.0",
     "glob": "^8.0.3",

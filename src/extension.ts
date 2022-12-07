@@ -10,6 +10,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerTextEditorCommand('vscode-better-align.align', (editor) => {
             formatter.process(editor);
         }),
+        vscode.languages.registerDocumentFormattingEditProvider('scss', formatter),
         vscode.workspace.onDidChangeTextDocument((e) => {
             if (alignAfterEnter && e.contentChanges.some((changes) => changes.text.includes('\n'))) {
                 vscode.commands.executeCommand('vscode-better-align.align');

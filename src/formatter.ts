@@ -46,7 +46,44 @@ function whitespace(count: number) {
     return new Array(count + 1).join(' ');
 }
 
-export class Formatter {
+export class Formatter implements vscode.DocumentFormattingEditProvider, vscode.DocumentRangeFormattingEditProvider {
+    public provideDocumentFormattingEdits(
+        document: vscode.TextDocument,
+        options: vscode.FormattingOptions,
+        token: vscode.CancellationToken
+    ): Promise<vscode.TextEdit[]> {
+        return this._format(document);
+    }
+
+    public provideDocumentRangeFormattingEdits(
+        document: vscode.TextDocument,
+        range: vscode.Range,
+        options: vscode.FormattingOptions,
+        token: vscode.CancellationToken
+    ): Promise<vscode.TextEdit[]> {
+        return this._format(document, range);
+    }
+    private async _format(document: vscode.TextDocument, range?: vscode.Range): Promise<vscode.TextEdit[]> {
+        this.document = document;
+        const source = document.getText(range);
+        let selections = [new vscode.Selection(0, 0, document.lineCount - 1, source.length - 1)];
+        var ranges: LineRange[] = this.getLineRanges(selections, document);
+
+        // Format
+        let formatted: string[][] = [];
+        for (let range of ranges) {
+            formatted.push(this.format(range));
+        }
+        let result = [];
+        for (let i = 0; i < ranges.length; ++i) {
+            var infos = ranges[i].infos;
+            var lastline = infos[infos.length - 1].line;
+            var location = new vscode.Range(infos[0].line.lineNumber, 0, lastline.lineNumber, lastline.text.length);
+
+            result.push(vscode.TextEdit.replace(location, formatted[i].join('\n')));
+        }
+        return Promise.resolve(result);
+    }
     /* Align:
      *   operators = += -= *= /= :
      *   trailling comment
@@ -54,10 +91,14 @@ export class Formatter {
      * Ignore anything inside a quote, comment, or block
      */
     public process(editor: vscode.TextEditor): void {
-        this.editor = editor;
+        this.document = editor.document;
 
+        let selections = [];
+        for (let sel of editor.selections) {
+            selections.push(sel);
+        }
         // Get line ranges
-        const ranges = this.getLineRanges(editor);
+        const ranges = this.getLineRanges(selections, editor.document);
 
         // Format
         let formatted: string[][] = [];
@@ -77,18 +118,18 @@ export class Formatter {
         });
     }
 
-    protected editor: vscode.TextEditor;
+    protected document: vscode.TextDocument;
 
-    protected getLineRanges(editor: vscode.TextEditor): LineRange[] {
+    protected getLineRanges(selections: vscode.Selection[], document: vscode.TextDocument): LineRange[] {
         var ranges: LineRange[] = [];
-        editor.selections.forEach((sel) => {
+        selections.forEach((sel) => {
             const indentBase = this.getConfig().get('indentBase', 'firstline') as string;
             const importantIndent: boolean = indentBase === 'dontchange';
 
             let res: LineRange;
             if (sel.isSingleLine) {
                 // If this selection is single line. Look up and down to search for the similar neighbour
-                ranges.push(this.narrow(0, editor.document.lineCount - 1, sel.active.line, importantIndent));
+                ranges.push(this.narrow(0, document.lineCount - 1, sel.active.line, importantIndent));
             } else {
                 // Otherwise, narrow down the range where to align
                 let start = sel.start.line;
@@ -122,7 +163,7 @@ export class Formatter {
         let langConfig: any = null;
 
         try {
-            langConfig = vscode.workspace.getConfiguration().get(`[${this.editor.document.languageId}]`) as any;
+            langConfig = vscode.workspace.getConfiguration().get(`[${this.document.languageId}]`) as any;
         } catch (e) {}
 
         return {
@@ -139,8 +180,108 @@ export class Formatter {
         };
     }
 
+    protected isPseudo(pos: number, text: string): boolean {
+        let result = false;
+
+        let presudoClasses = [
+            ':active',
+            ':any-link',
+            ':autofill',
+            ':blank',
+            ':checked',
+            ':current',
+            ':default',
+            ':defined',
+            ':dir',
+            ':disabled',
+            ':empty',
+            ':enabled',
+            ':first',
+            ':first-child',
+            ':first-of-type',
+            ':fullscreen',
+            ':future',
+            ':focus',
+            ':focus-visible',
+            ':focus-within',
+            ':has',
+            ':host',
+            ':host-context',
+            ':hover',
+            ':indeterminate',
+            ':in-range',
+            ':invalid',
+            ':is',
+            ':lang',
+            ':last-child',
+            ':last-of-type',
+            ':left',
+            ':link',
+            ':local-link',
+            ':modal',
+            ':not',
+            ':nth-child',
+            ':nth-col',
+            ':nth-last-child',
+            ':nth-last-col',
+            ':nth-last-of-type',
+            ':nth-of-type',
+            ':only-child',
+            ':only-of-type',
+            ':optional',
+            ':out-of-range',
+            ':past',
+            ':picture-in-picture',
+            ':placeholder-shown',
+            ':paused',
+            ':playing',
+            ':read-only',
+            ':read-write',
+            ':required',
+            ':right',
+            ':root',
+            ':scope',
+            ':state',
+            ':target',
+            ':target-within',
+            ':user-invalid',
+            ':valid',
+            ':visited',
+            ':where'
+        ];
+        let presudoElements = [
+            ':after',
+            ':backdrop',
+            ':before',
+            ':cue',
+            ':cue-region',
+            ':first-letter',
+            ':first-line',
+            ':file-selector-button',
+            ':grammar-error',
+            ':marker',
+            ':part',
+            ':placeholder',
+            ':selection',
+            ':slotted',
+            ':spelling-error',
+            ':target-text'
+        ];
+
+        for (let i = pos + 1; i < text.length; i++) {
+            if (presudoClasses.indexOf(text.substring(pos, i)) != -1) {
+                result = true;
+                break;
+            } else if (presudoElements.indexOf(text.substring(pos, i)) != -1) {
+                result = true;
+                break;
+            }
+        }
+        return result;
+    }
+
     protected tokenize(line: number): LineInfo {
-        let textline = this.editor.document.lineAt(line);
+        let textline = this.document.lineAt(line);
         let text = textline.text;
         let pos = 0;
         let lt: LineInfo = {
@@ -157,16 +298,21 @@ export class Formatter {
             let char = text.charAt(pos);
             let next = text.charAt(pos + 1);
 
+            let before = undefined;
+            if (pos) before = text.charAt(pos - 1);
+
             let currTokenType: TokenType;
 
             let nextSeek = 1;
+
+            let skipBlock = false;
 
             // Tokens order are important
             if (char.match(REG_WS)) {
                 currTokenType = TokenType.Whitespace;
             } else if (char === '"' || char === "'" || char === '`') {
                 currTokenType = TokenType.String;
-            } else if (char === '{' || char === '(' || char === '[') {
+            } else if ((char === '{' && (!before || (before && before !== '#'))) || char === '(' || char === '[') {
                 currTokenType = TokenType.Block;
             } else if (char === '}' || char === ')' || char === ']') {
                 currTokenType = TokenType.EndOfBlock;
@@ -176,7 +322,7 @@ export class Formatter {
                     next === '*')
             ) {
                 currTokenType = TokenType.Comment;
-            } else if (char === ':' && next !== ':') {
+            } else if (char === ':' && next !== ':' && (!before || (before && before !== ':')) && !this.isPseudo(pos, text)) {
                 currTokenType = TokenType.Colon;
             } else if (char === ',') {
                 if (lt.tokens.length === 0 || (lt.tokens.length === 1 && lt.tokens[0].type === TokenType.Whitespace)) {
